@@ -693,3 +693,38 @@ input:focus-visible {
 .footer .text-btn:hover {
   border-color: var(--ink);
 }
+
+.mast-plain {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 6px 12px rgba(23, 26, 32, 0.06);
+}
+
+.system-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.source {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink);
+}

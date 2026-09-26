@@ -189,7 +189,7 @@ function Mast({ title = 'Teslog', when, shifts, selectedId, onSelect, back, onSy
   const active = shifts?.find((shift) => shift.status === 'active')
   const away = onSelect && active && selectedId !== active.id
   return (
-    <header className="mast">
+    <header className={onSelect ? 'mast' : 'mast mast-plain'}>
       {back}
       <div className="mast-actions">
         {away ? (
@@ -238,6 +238,13 @@ function Systems({ onBack }) {
     get('/api/systems').then(setSystems).catch(() => setSystems([]))
   }, [])
 
+  // Each connected system has its own color; new systems without one get a spare color.
+  const spare = ['#F26B1D', '#3E6AE1', '#7B61FF', '#1FA463', '#C9A227']
+  const colorOf = (name) => {
+    const i = systems.findIndex((system) => system.name === name)
+    return i < 0 ? 'var(--secondary)' : systems[i].color || spare[i % spare.length]
+  }
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' })
   }, [turns, busy])
@@ -265,12 +272,15 @@ function Systems({ onBack }) {
   return (
     <>
       <div className="scroll">
-        <Mast title="Giga Hub" when="Plant systems connected to Teslog" back={<BackButton onClick={onBack} />} />
+        <Mast title="Giga Hub" back={<BackButton onClick={onBack} />} />
         <section className="group">
           <div className="card">
             {systems.map((system) => (
-              <article key={system.name} className="note" style={{ '--bar': COLORS.closed }}>
-                <p className="note-text">{system.name}</p>
+              <article key={system.name} className="note" style={{ '--bar': colorOf(system.name) }}>
+                <p className="note-text system-name">
+                  <span className="dot" style={{ background: colorOf(system.name) }} />
+                  {system.name}
+                </p>
                 <p className="quiet">
                   {system.about} · connected · {system.tools.length} tools
                 </p>
@@ -289,12 +299,23 @@ function Systems({ onBack }) {
           <section className="group" key={i}>
             <h2 className="group-label">{turn.q}</h2>
             <div className="card">
-              <article className="note" style={{ '--bar': COLORS.part }}>
+              <article
+                className="note"
+                style={{ '--bar': turn.a?.sources?.length ? colorOf(turn.a.sources[0]) : 'var(--line)' }}
+              >
                 {turn.a ? (
                   <>
                     <p className="note-text">{turn.a.answer}</p>
                     {turn.a.sources?.length ? (
-                      <p className="quiet">From {turn.a.sources.join(', ')}</p>
+                      <p className="quiet sources">
+                        From
+                        {turn.a.sources.map((source) => (
+                          <span key={source} className="source">
+                            <span className="dot" style={{ background: colorOf(source) }} />
+                            {source}
+                          </span>
+                        ))}
+                      </p>
                     ) : null}
                     {i === turns.length - 1 && turn.a.chips?.length ? (
                       <div className="chips mini">
