@@ -1,7 +1,4 @@
 // Static labels only. Shifts and all shift data come from the backend (/data) and the AI (/api).
-// Speech-to-text language for the mic buttons, e.g. 'en-US' or 'tr-TR'.
-export const MIC_LANG = 'en-US'
-
 export const COLORS = {
   open: '#E82127',
   part: '#3E6AE1',

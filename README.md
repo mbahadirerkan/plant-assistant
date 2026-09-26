@@ -18,7 +18,7 @@ cd web; npm install; npm run dev
 ```
 App: http://localhost:5173 · Control page (fire line warnings, see SAP/tickets change, reset the demo): http://localhost:8001
 
-"Pass to next shift" moves the calendar on (early → late → night → next day). Mic buttons use the browser's speech recognition (Chrome/Edge; language in `web/src/data.js`). History starts 3 shifts before today.
+"Pass to next shift" moves the calendar on (early → late → night → next day). Mic buttons open the device's own dictation (phone keyboard mic, Win+H, Mac dictation key). History starts 3 shifts before today.
 
 Add a system: write an MCP server in `mcp_servers/`, add an entry to `SYSTEMS` in `agent/server.py`.
 Busy model (503)? The agent retries and switches to backup models automatically (picked from your key's models at startup, or set `LLM_FALLBACKS`). List models your key can use: `python agent/server.py --models`.

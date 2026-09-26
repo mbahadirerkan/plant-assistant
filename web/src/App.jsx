@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
-import { COLORS, MIC_LANG, NOTE_TYPES, RECORD_FIELDS, groupsFromNotes, shownType } from './data.js'
+import { COLORS, NOTE_TYPES, RECORD_FIELDS, groupsFromNotes, shownType } from './data.js'
 
 async function call(method, path, body) {
   const res = await fetch(path, {
@@ -22,54 +22,43 @@ function fitPhone() {
   document.documentElement.style.setProperty('--phone-scale', String(scale))
 }
 
-const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition
+// Web pages cannot start the OS dictation themselves, so the mic button puts the cursor in the
+// text field (which opens the phone keyboard with its mic key) and says how to start dictation here.
+function dictationHint() {
+  const ua = navigator.userAgent
+  if (/iPhone|iPad|iPod|Android/i.test(ua)) return 'Tap the mic on your keyboard'
+  if (/Windows/i.test(ua)) return 'Press Win + H to dictate'
+  if (/Mac/i.test(ua)) return 'Press the dictation key (mic or Fn twice)'
+  return "Use your device's dictation"
+}
 
-// Dictation into a text field with the browser's speech recognition. Hidden where it is not supported.
-function MicButton({ value, onChange }) {
-  const [listening, setListening] = useState(false)
-  const [blocked, setBlocked] = useState(false)
-  const recRef = useRef(null)
-  useEffect(() => () => recRef.current?.abort(), [])
-  if (!Recognition) return null
-
-  function toggle() {
-    if (listening) {
-      recRef.current?.stop()
-      return
-    }
-    const rec = new Recognition()
-    const before = value.trim() ? `${value.trim()} ` : ''
-    rec.lang = MIC_LANG
-    rec.continuous = true
-    rec.interimResults = true
-    rec.onresult = (event) => {
-      onChange(before + Array.from(event.results, (result) => result[0].transcript).join(''))
-    }
-    rec.onend = () => setListening(false)
-    rec.onerror = (event) => {
-      setListening(false)
-      setBlocked(['not-allowed', 'service-not-allowed', 'audio-capture'].includes(event.error))
-    }
-    recRef.current = rec
-    rec.start()
-    setBlocked(false)
-    setListening(true)
-  }
+function MicButton() {
+  const [hint, setHint] = useState(false)
+  useEffect(() => {
+    if (!hint) return undefined
+    const timer = window.setTimeout(() => setHint(false), 5000)
+    return () => window.clearTimeout(timer)
+  }, [hint])
 
   return (
-    <button
-      className={listening ? 'mic-btn mic-on' : blocked ? 'mic-btn mic-blocked' : 'mic-btn'}
-      type="button"
-      aria-label={listening ? 'Stop listening' : 'Speak'}
-      title={blocked ? 'Microphone is blocked. Allow it in the browser.' : undefined}
-      aria-pressed={listening}
-      onClick={toggle}
-    >
-      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-        <rect x="9" y="3" width="6" height="11" rx="3" />
-        <path d="M5 11a7 7 0 0 0 14 0M12 18v3" fill="none" strokeWidth="2" strokeLinecap="round" />
-      </svg>
-    </button>
+    <span className="mic-wrap">
+      {hint ? <span className="mic-hint">{dictationHint()}</span> : null}
+      <button
+        className={hint ? 'mic-btn mic-on' : 'mic-btn'}
+        type="button"
+        aria-label="Dictate"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={(event) => {
+          event.currentTarget.closest('.field-row')?.querySelector('textarea')?.focus()
+          setHint(true)
+        }}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="9" y="3" width="6" height="11" rx="3" />
+          <path d="M5 11a7 7 0 0 0 14 0M12 18v3" fill="none" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </button>
+    </span>
   )
 }
 
@@ -403,7 +392,7 @@ function Systems({ onBack }) {
             onChange={(event) => setText(event.target.value)}
             aria-label="Ask"
           />
-          <MicButton value={text} onChange={setText} />
+          <MicButton />
         </div>
         <button className="primary" type="submit" disabled={!text.trim() || busy}>
           Ask
@@ -918,7 +907,7 @@ export default function App() {
                 onChange={(event) => setDraftText(event.target.value)}
                 aria-label="What was done"
               />
-              <MicButton value={draftText} onChange={setDraftText} />
+              <MicButton />
             </div>
             {error ? <p className="quiet">{error}</p> : null}
             <button className="primary" type="button" disabled={!draftText.trim() || busy} onClick={makeRecord}>
@@ -950,7 +939,7 @@ export default function App() {
             aria-label="Note"
             maxLength={160}
           />
-          <MicButton value={draftText} onChange={setDraftText} />
+          <MicButton />
         </div>
         <div className="chips">
           {NOTE_TYPES.map((type) => (
