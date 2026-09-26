@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
-import { COLORS, NOTE_TYPES, RECORD_FIELDS, groupsFromNotes, shownType } from './data.js'
+import { COLORS, MIC_LANG, NOTE_TYPES, RECORD_FIELDS, groupsFromNotes, shownType } from './data.js'
 
 async function call(method, path, body) {
   const res = await fetch(path, {
@@ -20,6 +20,57 @@ function fitPhone() {
     (window.innerHeight - 48) / 800
   )
   document.documentElement.style.setProperty('--phone-scale', String(scale))
+}
+
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition
+
+// Dictation into a text field with the browser's speech recognition. Hidden where it is not supported.
+function MicButton({ value, onChange }) {
+  const [listening, setListening] = useState(false)
+  const [blocked, setBlocked] = useState(false)
+  const recRef = useRef(null)
+  useEffect(() => () => recRef.current?.abort(), [])
+  if (!Recognition) return null
+
+  function toggle() {
+    if (listening) {
+      recRef.current?.stop()
+      return
+    }
+    const rec = new Recognition()
+    const before = value.trim() ? `${value.trim()} ` : ''
+    rec.lang = MIC_LANG
+    rec.continuous = true
+    rec.interimResults = true
+    rec.onresult = (event) => {
+      onChange(before + Array.from(event.results, (result) => result[0].transcript).join(''))
+    }
+    rec.onend = () => setListening(false)
+    rec.onerror = (event) => {
+      setListening(false)
+      setBlocked(['not-allowed', 'service-not-allowed', 'audio-capture'].includes(event.error))
+    }
+    recRef.current = rec
+    rec.start()
+    setBlocked(false)
+    setListening(true)
+  }
+
+  return (
+    <button
+      className={listening ? 'mic-btn mic-on' : blocked ? 'mic-btn mic-blocked' : 'mic-btn'}
+      type="button"
+      aria-label={listening ? 'Stop listening' : 'Speak'}
+      title={blocked ? 'Microphone is blocked. Allow it in the browser.' : undefined}
+      aria-pressed={listening}
+      onClick={toggle}
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="9" y="3" width="6" height="11" rx="3" />
+        <path d="M5 11a7 7 0 0 0 14 0M12 18v3" fill="none" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    </button>
+  )
 }
 
 function NoteRow({ note, fresh, onOpen, onAction }) {
@@ -343,14 +394,17 @@ function Systems({ onBack }) {
           ask(text)
         }}
       >
-        <textarea
-          className="line-field"
-          rows={1}
-          value={text}
-          placeholder="Ask anything · or use the keyboard mic"
-          onChange={(event) => setText(event.target.value)}
-          aria-label="Ask"
-        />
+        <div className="field-row">
+          <textarea
+            className="line-field"
+            rows={1}
+            value={text}
+            placeholder="Ask anything · or tap the mic"
+            onChange={(event) => setText(event.target.value)}
+            aria-label="Ask"
+          />
+          <MicButton value={text} onChange={setText} />
+        </div>
         <button className="primary" type="submit" disabled={!text.trim() || busy}>
           Ask
         </button>
@@ -435,7 +489,8 @@ export default function App() {
   const openNote = sheet?.noteId ? allNotes.find((note) => note.id === sheet.noteId) : null
   const activeId = day.shift?.id
   const shift = shifts.find((item) => item.id === selectedId)
-  const nextKind = day.shift?.kind === 'day' ? 'night' : 'day'
+  const nextKind = day.shift?.next_kind ?? 'next'
+  const prevKind = day.shift?.prev_kind ?? 'previous'
 
   function openSheet(next) {
     setError('')
@@ -638,7 +693,7 @@ export default function App() {
           {offline ? <p className="empty">Cannot reach the plant systems.</p> : null}
           {day.received ? (
             <HandoffCard
-              label={`From the ${nextKind} shift`}
+              label={`From the ${prevKind} shift`}
               handoff={day.received}
               onConfirm={confirmReceived}
             />
@@ -854,14 +909,17 @@ export default function App() {
           </>
         ) : (
           <>
-            <textarea
-              className="line-field"
-              rows={4}
-              value={draftText}
-              placeholder="Say it in your own words · tap the mic on your keyboard"
-              onChange={(event) => setDraftText(event.target.value)}
-              aria-label="What was done"
-            />
+            <div className="field-row">
+              <textarea
+                className="line-field"
+                rows={4}
+                value={draftText}
+                placeholder="Say it in your own words · tap the mic"
+                onChange={(event) => setDraftText(event.target.value)}
+                aria-label="What was done"
+              />
+              <MicButton value={draftText} onChange={setDraftText} />
+            </div>
             {error ? <p className="quiet">{error}</p> : null}
             <button className="primary" type="button" disabled={!draftText.trim() || busy} onClick={makeRecord}>
               {busy ? 'Writing the record…' : 'Make the record'}
@@ -882,15 +940,18 @@ export default function App() {
         }}
       >
         <h2 className="sheet-title">Add a note</h2>
-        <textarea
-          className="line-field"
-          value={draftText}
-          rows={3}
-          placeholder="Type, or tap the mic on your keyboard"
-          onChange={(event) => setDraftText(event.target.value)}
-          aria-label="Note"
-          maxLength={160}
-        />
+        <div className="field-row">
+          <textarea
+            className="line-field"
+            value={draftText}
+            rows={3}
+            placeholder="Type, or tap the mic"
+            onChange={(event) => setDraftText(event.target.value)}
+            aria-label="Note"
+            maxLength={160}
+          />
+          <MicButton value={draftText} onChange={setDraftText} />
+        </div>
         <div className="chips">
           {NOTE_TYPES.map((type) => (
             <button

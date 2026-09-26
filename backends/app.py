@@ -37,26 +37,32 @@ def now():
     return dt.datetime.now().isoformat(timespec="seconds")
 
 
-# ---- Shift calendar: day 06-18, night 18-06. Ids like 2026-09-26-day ----
+# ---- Shift calendar: early 06-14, late 14-22, night 22-06. Ids like 2026-09-26-early (sort in time order) ----
+KINDS = ["early", "late", "night"]
+ENDS = {"early": 14, "late": 22, "night": 6}
+
+
 def shift_id(date, kind):
     return f"{date.isoformat()}-{kind}"
 
 
 def next_shift(sid):
     date, kind = dt.date.fromisoformat(sid[:10]), sid[11:]
-    return shift_id(date, "night") if kind == "day" else shift_id(date + dt.timedelta(days=1), "day")
+    i = KINDS.index(kind)
+    return shift_id(date, KINDS[i + 1]) if i < 2 else shift_id(date + dt.timedelta(days=1), KINDS[0])
 
 
 def shift_info(sid, status):
     date, kind = dt.date.fromisoformat(sid[:10]), sid[11:]
+    i = KINDS.index(kind)
     return {"id": sid, "kind": kind, "status": status, "label": f"{kind.capitalize()} {date.day}",
-            "when": f"{date:%a %d %b} · {kind.capitalize()} shift", "date": date.isoformat()}
+            "when": f"{date:%a %d %b} · {kind.capitalize()} shift", "date": date.isoformat(),
+            "next_kind": KINDS[(i + 1) % 3], "prev_kind": KINDS[(i - 1) % 3]}
 
 
 def shift_end(sid):
     date, kind = dt.date.fromisoformat(sid[:10]), sid[11:]
-    return (dt.datetime.combine(date, dt.time(18)) if kind == "day"
-            else dt.datetime.combine(date + dt.timedelta(days=1), dt.time(6))).isoformat()
+    return dt.datetime.combine(date + dt.timedelta(days=kind == "night"), dt.time(ENDS[kind])).isoformat()
 
 
 def active():
@@ -68,8 +74,9 @@ def seed():
     LINE.update({"name": "Doors", "status": "running", "output": 212, "target": 240,
                  "stations": {"12": "running", "14": "running"}})
     today = dt.date.today()
-    y, yy = today - dt.timedelta(days=1), today - dt.timedelta(days=2)
-    s_n2, s_d1, s_n1, s_d0 = shift_id(yy, "night"), shift_id(y, "day"), shift_id(y, "night"), shift_id(today, "day")
+    y = today - dt.timedelta(days=1)
+    s_e1, s_l1, s_n1, s_e0 = (shift_id(y, "early"), shift_id(y, "late"), shift_id(y, "night"),
+                              shift_id(today, "early"))
     c = db()
     for (t,) in c.execute("select name from sqlite_master where type='table'").fetchall():
         c.execute(f"drop table {t}")
@@ -85,7 +92,7 @@ def seed():
     create table handoffs(id integer primary key, shift text, ts text, paragraph text, groups text, confirmed text);
     """)
     c.executemany("insert into shifts values (?,?)",
-                  [(s_n2, "passed"), (s_d1, "passed"), (s_n1, "passed"), (s_d0, "active")])
+                  [(s_e1, "passed"), (s_l1, "passed"), (s_n1, "passed"), (s_e0, "active")])
     c.executemany("insert into employees values (?,?,?,?,?,?,?,?)", [
         ("E201", "Lena Fischer", "Door fitter", "12", "Good", 0, 1, "Trained on station 12."),
         ("E202", "Sam Weber", "Door fitter", "14", "Good", 2, 0, "Absent today."),
@@ -96,16 +103,16 @@ def seed():
     ])
     c.executemany("insert into stations values (?,?)", [("12", "E201"), ("14", None)])
     c.executemany("insert into notes(shift,ts,station,type,text,source,severity) values (?,?,?,?,?,?,?)", [
-        (s_n1, f"{y}T23:40:00", "14", "open", "Station 14 torque tool rejects bolts", "supervisor", "medium"),
+        (s_n1, f"{y}T22:40:00", "14", "open", "Station 14 torque tool rejects bolts", "supervisor", "medium"),
         (s_n1, f"{today}T01:10:00", "14", "method", "Two people set the door because the lift is slow. Official method still says one person.", "supervisor", "low"),
         (s_n1, f"{today}T03:05:00", "12", "check", "Station 12 was missing clips", "supervisor", "low"),
     ])
     past = {
-        s_n2: ("Hinge bolts at station 14 were short. Station 12 seal pressed in by hand. Spare socket found.",
+        s_e1: ("Hinge bolts at station 14 were short. Station 12 seal pressed in by hand. Spare socket found.",
                [("Still open", "open", "Station 14 hinge bolts were short"),
                 ("Not in the instruction", "method", "Station 12 seal pressed in by hand. Official method still says use the roller."),
                 ("Closed", "closed", "Station 14 spare socket was in the crib")]),
-        s_d1: ("Clip bin at station 12 ran low. Station 14 lift paused, one person guided the door. Hinge bolts arrived.",
+        s_l1: ("Clip bin at station 12 ran low. Station 14 lift paused, one person guided the door. Hinge bolts arrived.",
                [("Still open", "open", "Station 12 clip bin was low"),
                 ("Not in the instruction", "method", "Station 14 lift paused, so one person guided the door. Official method still says use the lift."),
                 ("Closed", "closed", "Station 14 hinge bolts arrived")]),

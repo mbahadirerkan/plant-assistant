@@ -728,3 +728,60 @@ input:focus-visible {
   gap: 5px;
   color: var(--ink);
 }
+
+.field-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.field-row .line-field {
+  flex: 1;
+}
+
+.ask-bar .field-row {
+  margin-bottom: 10px;
+}
+
+.ask-bar .field-row .line-field {
+  margin: 0;
+}
+
+.mic-btn {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 4px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--card);
+}
+
+.mic-btn svg {
+  fill: var(--ink);
+  stroke: var(--ink);
+}
+
+.mic-on {
+  border-color: var(--rust);
+  background: var(--rust);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.mic-on svg {
+  fill: var(--card);
+  stroke: var(--card);
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 33, 39, 0.35); }
+  50% { box-shadow: 0 0 0 8px rgba(232, 33, 39, 0); }
+}
+
+.mic-blocked {
+  border-color: var(--rust);
+  opacity: 0.6;
+}

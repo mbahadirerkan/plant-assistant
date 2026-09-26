@@ -233,7 +233,7 @@ async def classify(w: Words):
 @app.post("/api/handoff")
 async def handoff():
     shift, staffing, tickets = await asyncio.gather(data("GET", "/shift/current"), data("GET", "/stations"), data("GET", "/tickets"))
-    nxt = "night" if shift["shift"]["kind"] == "day" else "day"
+    nxt = shift["shift"]["next_kind"]
     return await ask_llm(
         f"Write the handoff for the {nxt} shift from this data only. Shift log: {json.dumps(shift)}. "
         f"Staffing: {json.dumps(staffing)}. Maintenance tickets: {json.dumps(tickets)}. "
