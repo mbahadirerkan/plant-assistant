@@ -414,20 +414,30 @@ def reset():
 # ---- Demo control page: the "real systems" screen ----
 @app.get("/", response_class=HTMLResponse)
 def home():
-    t = lambda rows: "<table>" + "".join("<tr>" + "".join(f"<td>{v}</td>" for v in r) + "</tr>" for r in rows) + "</table>"
+    def t(cols, rows):
+        head = "<tr>" + "".join(f"<th>{c}</th>" for c in cols) + "</tr>"
+        body = "".join("<tr>" + "".join(f"<td>{v}</td>" for v in r) + "</tr>" for r in rows)
+        return f"<table>{head}{body or f'<tr><td colspan={len(cols)} class=empty>no rows</td></tr>'}</table>"
+
     btn = lambda url, label: f"<button onclick=\"fetch('{url}',{{method:'POST'}}).then(()=>location.reload())\">{label}</button> "
     fire = "".join(btn(f"/line/trigger/{i}", f"Fire: {s['text']}") + "<br>" for i, s in enumerate(SCRIPTED))
-    st = t([(k, v) for k, v in LINE["stations"].items()])
-    hr = t([(e["id"], e["name"], e["stations"], "present" if e["present"] else "absent", e["performance"], e["notes"]) for e in employees()])
-    sts = t([(s["id"], s["employee"]["name"] if s["employee"] else "empty") for s in stations()])
-    tk = t([(k["id"], k["ts"][11:16], k["station"], k["text"], k["status"]) for k in tickets()]) or "none"
-    cal = t([(s["label"], s["status"]) for s in shifts()])
-    lg = t([(r["ts"][11:16], r["text"][:60], r["kind"], r["ltext"]) for r in db().execute(
+    st = t(["station", "state"], LINE["stations"].items())
+    hr = t(["id", "name", "role", "stations", "present", "performance", "absences_30d", "notes"],
+           [(e["id"], e["name"], e["role"], e["stations"], e["present"], e["performance"], e["absences_30d"], e["notes"])
+            for e in employees()])
+    sts = t(["id", "employee"], [(s["id"], f"{s['employee']['id']} ({s['employee']['name']})" if s["employee"] else "NULL")
+                                 for s in stations()])
+    tk = t(["id", "ts", "station", "text", "status"], [(k["id"], k["ts"], k["station"], k["text"], k["status"]) for k in tickets()])
+    cal = t(["id", "status"], [(s["id"], s["status"]) for s in shifts()])
+    lg = t(["log.ts", "note.text", "log.kind", "log.text"], [(r["ts"], r["text"][:60], r["kind"], r["ltext"]) for r in db().execute(
         "select l.ts, n.text, l.kind, l.text as ltext from log l join notes n on n.id=l.note_id order by l.id desc limit 15")])
     return f"""<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="4"><style>body{{font-family:sans-serif;margin:20px;display:grid;grid-template-columns:1fr 1fr;gap:0 30px}}
-    table{{border-collapse:collapse}}td{{border:1px solid #ccc;padding:4px 8px;font-size:14px}}h3{{margin:18px 0 6px}}button{{margin:3px 0}}</style></head><body>
-    <div><h3>Line (MES) · Doors · {LINE['output']}/{LINE['target']}</h3>{fire}{st}<h3>Station staffing (SAP HR)</h3>{sts}<h3>Maintenance tickets</h3>{tk}</div>
-    <div><h3>Shifts</h3>{cal}{btn('/reset', 'Reset demo')}<h3>SAP HR</h3>{hr}<h3>Shift log · actions & responses</h3>{lg}</div></body></html>"""
+    table{{border-collapse:collapse}}td,th{{border:1px solid #ccc;padding:4px 8px;font-size:14px;text-align:left}}th{{background:#f4f4f4;font-family:monospace;font-size:13px}}
+    .empty{{color:#999}}h3{{margin:18px 0 6px}}h3 code{{font-weight:normal;color:#666;font-size:13px}}button{{margin:3px 0}}</style></head><body>
+    <div><h3>Line (MES) · Doors · {LINE['output']}/{LINE['target']} <code>line status</code></h3>{fire}{st}
+    <h3>Station staffing (SAP HR) <code>stations</code></h3>{sts}<h3>Maintenance <code>tickets</code></h3>{tk}</div>
+    <div><h3>Shifts <code>shifts</code></h3>{cal}{btn('/reset', 'Reset demo')}<h3>SAP HR <code>employees</code></h3>{hr}
+    <h3>Shift log <code>log ⋈ notes</code></h3>{lg}</div></body></html>"""
 
 
 if __name__ == "__main__":
