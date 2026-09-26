@@ -40,8 +40,10 @@ USE_CLAUDE = bool(os.getenv("ANTHROPIC_API_KEY"))
 CLAUDE_MODEL = os.getenv("LLM_MODEL", "claude-opus-5")
 CLAUDE_EFFORT = os.getenv("LLM_EFFORT", "medium")  # low | medium | high: lower is faster
 # Standard certificate check (certifi bundle): on some Windows setups two truststore copies loop forever.
+# gzip only: older Brotli packages break the SDK's decompression of Anthropic's replies.
 claude = anthropic.AsyncAnthropic(
     max_retries=4,  # the SDK retries 429 / 529 overloaded / 5xx with backoff
+    default_headers={"Accept-Encoding": "gzip, deflate"},
     http_client=anthropic.DefaultAsyncHttpxClient(verify=ssl.create_default_context(cafile=certifi.where())),
 )
 claude_fallbacks = True  # server-side refusal fallbacks; switched off if the API rejects them
