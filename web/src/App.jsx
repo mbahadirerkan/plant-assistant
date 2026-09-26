@@ -172,11 +172,12 @@ function ShiftStrip({ shifts, selectedId, onSelect }) {
       {shifts.map((shift) => (
         <button
           key={shift.id}
-          className="shift"
+          className={shift.status === 'active' ? 'shift shift-now' : 'shift'}
           type="button"
           aria-pressed={shift.id === selectedId}
           onClick={() => onSelect(shift.id)}
         >
+          {shift.status === 'active' ? <span className="now-tag">Today</span> : null}
           {shift.label}
         </button>
       ))}
@@ -185,14 +186,29 @@ function ShiftStrip({ shifts, selectedId, onSelect }) {
 }
 
 function Mast({ title = 'Teslog', when, shifts, selectedId, onSelect, back, onSystems }) {
+  const active = shifts?.find((shift) => shift.status === 'active')
+  const away = onSelect && active && selectedId !== active.id
   return (
     <header className="mast">
       {back}
-      {onSystems ? (
-        <button className="systems-btn" type="button" onClick={onSystems}>
-          Giga Hub
-        </button>
-      ) : null}
+      <div className="mast-actions">
+        {away ? (
+          <button className="today-btn" type="button" onClick={() => onSelect(active.id)}>
+            Today
+          </button>
+        ) : null}
+        {onSystems ? (
+          <button className="hub-btn" type="button" onClick={onSystems}>
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <circle cx="3" cy="3" r="2" />
+              <circle cx="11" cy="3" r="2" />
+              <circle cx="3" cy="11" r="2" />
+              <circle cx="11" cy="11" r="2" />
+            </svg>
+            Giga Hub
+          </button>
+        ) : null}
+      </div>
       <h1 className="title">{title}</h1>
       <hr className="rust" />
       {when ? <p className="when">{when}</p> : null}
@@ -576,7 +592,13 @@ export default function App() {
   } else if (shift.status === 'next') {
     body = (
       <div className="scroll">
-        <Mast when={shift.when} shifts={shifts} selectedId={selectedId} onSelect={selectShift} />
+        <Mast
+          when={shift.when}
+          shifts={shifts}
+          selectedId={selectedId}
+          onSelect={selectShift}
+          onSystems={() => setScreen('systems')}
+        />
         <p className="empty">Nothing passed yet.</p>
       </div>
     )
@@ -646,7 +668,13 @@ export default function App() {
   } else {
     body = (
       <div className="scroll">
-        <Mast when={shift.when} shifts={shifts} selectedId={selectedId} onSelect={selectShift} />
+        <Mast
+          when={shift.when}
+          shifts={shifts}
+          selectedId={selectedId}
+          onSelect={selectShift}
+          onSystems={() => setScreen('systems')}
+        />
         {past?.handoff ? (
           <>
             <HandoffCard label="Passed on" handoff={past.handoff} />

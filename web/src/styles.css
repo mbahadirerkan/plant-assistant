@@ -144,6 +144,7 @@ input:focus-visible {
 
 .strip {
   display: flex;
+  padding-top: 14px !important;
   gap: 10px;
   justify-content: space-between;
   overflow-x: auto;
@@ -552,17 +553,41 @@ input:focus-visible {
   color: var(--ink);
 }
 
-.systems-btn {
+.mast-actions {
   position: absolute;
-  top: 22px;
+  top: 20px;
   right: 22px;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--card);
-  color: var(--ink);
-  font-size: 14px;
+  display: flex;
+  gap: 8px;
   pointer-events: auto;
+}
+
+.hub-btn,
+.today-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.hub-btn {
+  border: 0;
+  background: var(--ink);
+  color: var(--card);
+}
+
+.hub-btn svg {
+  fill: var(--rust);
+}
+
+.today-btn {
+  border: 1px solid var(--rust);
+  background: var(--card);
+  color: var(--rust);
 }
 
 .file-link {
@@ -630,4 +655,24 @@ input:focus-visible {
 .cover-choice:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+.shift {
+  position: relative;
+}
+
+.now-tag {
+  position: absolute;
+  top: -13px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rust);
+}
+
+.shift-now {
+  color: var(--ink);
 }
