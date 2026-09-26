@@ -6,6 +6,7 @@ import sys
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
+import anthropic
 import httpx
 import uvicorn
 from fastapi import FastAPI, Request
@@ -31,7 +32,13 @@ SYSTEMS = [
      "examples": ["Summarize the last 3 days", "What is still open from last night?"]},
 ]
 
-# Any OpenAI-compatible provider. Default: Gemini. Ollama: LLM_BASE_URL=http://localhost:11434/v1
+# Claude when ANTHROPIC_API_KEY is set; otherwise any OpenAI-compatible provider (default Gemini,
+# Ollama: LLM_BASE_URL=http://localhost:11434/v1).
+USE_CLAUDE = bool(os.getenv("ANTHROPIC_API_KEY"))
+CLAUDE_MODEL = os.getenv("LLM_MODEL", "claude-opus-5")
+CLAUDE_EFFORT = os.getenv("LLM_EFFORT", "medium")  # low | medium | high: lower is faster
+claude = anthropic.AsyncAnthropic(max_retries=4)  # the SDK retries 429 / 529 overloaded / 5xx with backoff
+claude_fallbacks = True  # server-side refusal fallbacks; switched off if the API rejects them
 BASE_URL = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
 MODEL = os.getenv("LLM_MODEL", "gemini-3.8-flash")
 API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY") or "none"
@@ -43,7 +50,7 @@ Active shift: {when} (id {id}). Use tools for facts; never invent people, number
 Write like Teslog: short, plain, factual sentences. No markdown."""
 
 llm = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY, max_retries=0)
-tools, route, subscribers = [], {}, set()
+tools, claude_tools, route, subscribers = [], [], {}, set()
 
 
 def clean(schema):
@@ -78,10 +85,21 @@ async def complete(**kw):
     raise error
 
 
+async def run_tool(name, args):
+    try:
+        res = await route[name].call_tool(name, args)
+        return "\n".join(c.text for c in res.content if hasattr(c, "text"))
+    except Exception as e:
+        return f"Error: {e}"
+
+
 async def ask_llm(task, final_tool, history=None, use_tools=True):
     """Run a tool loop until the model calls final_tool; returns its arguments."""
     shift = (await data("GET", "/shift/current"))["shift"]
-    msgs = [{"role": "system", "content": CONTEXT.format(**shift)}] + (history or []) + [{"role": "user", "content": task}]
+    system = CONTEXT.format(**shift)
+    if USE_CLAUDE:
+        return await ask_claude(system, (history or []) + [{"role": "user", "content": task}], final_tool, use_tools)
+    msgs = [{"role": "system", "content": system}] + (history or []) + [{"role": "user", "content": task}]
     fn = (tools if use_tools else []) + [final_tool]
     name = final_tool["function"]["name"]
     for _ in range(8):
@@ -92,12 +110,46 @@ async def ask_llm(task, final_tool, history=None, use_tools=True):
             args = json.loads(tc.function.arguments or "{}")
             if tc.function.name == name:
                 return args
-            try:
-                res = await route[tc.function.name].call_tool(tc.function.name, args)
-                out = "\n".join(c.text for c in res.content if hasattr(c, "text"))
-            except Exception as e:
-                out = f"Error: {e}"
-            msgs.append({"role": "tool", "tool_call_id": tc.id, "content": out})
+            msgs.append({"role": "tool", "tool_call_id": tc.id, "content": await run_tool(tc.function.name, args)})
+    raise RuntimeError("The model did not finish.")
+
+
+async def claude_create(**kw):
+    """Messages call with server-side refusal fallbacks; drops them if this account/model rejects them."""
+    global claude_fallbacks
+    if claude_fallbacks:
+        try:
+            return await claude.beta.messages.create(
+                betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kw)
+        except anthropic.BadRequestError as e:
+            if "fallback" not in str(e).lower():
+                raise
+            print("refusal fallbacks not available, continuing without them")
+            claude_fallbacks = False
+    return await claude.beta.messages.create(**kw)
+
+
+async def ask_claude(system, msgs, final_tool, use_tools):
+    fn = final_tool["function"]
+    name = fn["name"]
+    ctools = (claude_tools if use_tools else []) + [
+        {"name": name, "description": fn["description"], "input_schema": fn["parameters"]}]
+    system += f"\nAlways finish by calling the {name} tool with your result."
+    for _ in range(10):
+        r = await claude_create(model=CLAUDE_MODEL, max_tokens=16000, system=system, tools=ctools,
+                                messages=msgs, output_config={"effort": CLAUDE_EFFORT})
+        if r.stop_reason == "refusal":
+            raise RuntimeError("Claude declined this request.")
+        msgs.append({"role": "assistant", "content": r.content})
+        uses = [b for b in r.content if b.type == "tool_use"]
+        if not uses:  # answered in text instead of the final tool: ask once more
+            msgs.append({"role": "user", "content": f"Call the {name} tool with your result."})
+            continue
+        for b in uses:
+            if b.name == name:
+                return b.input
+        results = [{"type": "tool_result", "tool_use_id": b.id, "content": await run_tool(b.name, b.input)} for b in uses]
+        msgs.append({"role": "user", "content": results})
     raise RuntimeError("The model did not finish.")
 
 
@@ -115,6 +167,9 @@ async def data(method, path, **kw):
 
 async def pick_fallbacks():
     """No LLM_FALLBACKS set: use up to 2 other text 'flash' models this key can access."""
+    if USE_CLAUDE:
+        print(f"model: {CLAUDE_MODEL} (Claude, effort {CLAUDE_EFFORT})")
+        return
     if FALLBACKS:
         return
     try:
@@ -141,6 +196,7 @@ async def lifespan(app):
             for t in (await sess.list_tools()).tools:
                 tools.append({"type": "function", "function": {
                     "name": t.name, "description": t.description or "", "parameters": clean(t.input_schema)}})
+                claude_tools.append({"name": t.name, "description": t.description or "", "input_schema": t.input_schema})
                 route[t.name] = sess
                 s["tools"].append(t.name)
         yield
@@ -282,7 +338,7 @@ async def stream():
 if __name__ == "__main__":
     if "--models" in sys.argv:  # list the models your key can use
         async def show():
-            async for m in llm.models.list():
+            async for m in (claude if USE_CLAUDE else llm).models.list():
                 print(m.id)
         asyncio.run(show())
     else:

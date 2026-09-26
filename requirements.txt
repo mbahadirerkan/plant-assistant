@@ -2,5 +2,6 @@ fastapi
 uvicorn
 httpx
 openai
+anthropic
 mcp>=2
 fpdf2
