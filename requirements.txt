@@ -3,5 +3,6 @@ uvicorn
 httpx
 openai
 anthropic
+certifi
 mcp>=2
 fpdf2

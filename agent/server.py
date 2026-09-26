@@ -2,11 +2,13 @@
 import asyncio
 import json
 import os
+import ssl
 import sys
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 import anthropic
+import certifi
 import httpx
 import uvicorn
 from fastapi import FastAPI, Request
@@ -37,7 +39,11 @@ SYSTEMS = [
 USE_CLAUDE = bool(os.getenv("ANTHROPIC_API_KEY"))
 CLAUDE_MODEL = os.getenv("LLM_MODEL", "claude-opus-5")
 CLAUDE_EFFORT = os.getenv("LLM_EFFORT", "medium")  # low | medium | high: lower is faster
-claude = anthropic.AsyncAnthropic(max_retries=4)  # the SDK retries 429 / 529 overloaded / 5xx with backoff
+# Standard certificate check (certifi bundle): on some Windows setups two truststore copies loop forever.
+claude = anthropic.AsyncAnthropic(
+    max_retries=4,  # the SDK retries 429 / 529 overloaded / 5xx with backoff
+    http_client=anthropic.DefaultAsyncHttpxClient(verify=ssl.create_default_context(cafile=certifi.where())),
+)
 claude_fallbacks = True  # server-side refusal fallbacks; switched off if the API rejects them
 BASE_URL = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
 MODEL = os.getenv("LLM_MODEL", "gemini-3.8-flash")
