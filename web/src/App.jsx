@@ -1,13 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
-import {
-  COLORS,
-  CURRENT,
-  NOTE_TYPES,
-  RECORD_FIELDS,
-  SHIFTS,
-  groupsFromNotes,
-  shownType,
-} from './data.js'
+import { COLORS, NOTE_TYPES, RECORD_FIELDS, groupsFromNotes, shownType } from './data.js'
 
 async function call(method, path, body) {
   const res = await fetch(path, {
@@ -134,7 +126,7 @@ function Stations({ stations, onCover }) {
             >
               <p className="note-text">Station {station.id} · empty</p>
               <p className="prompt">Choose who covers this</p>
-              <p className="quiet">Sam is absent. Also on Day 25.</p>
+              <p className="quiet">Sam is absent.</p>
             </button>
           )
         })}
@@ -143,23 +135,41 @@ function Stations({ stations, onCover }) {
   )
 }
 
-function HandoffDraft({ text }) {
+function HandoffCard({ label, handoff, onConfirm }) {
   return (
     <section className="group">
-      <h2 className="group-label">For the night shift</h2>
+      <h2 className="group-label">{label}</h2>
       <div className="card">
         <article className="note" style={{ '--bar': COLORS.method }}>
-          <p className="note-text">{text}</p>
+          <p className="note-text">{handoff.paragraph}</p>
+          <a className="quiet file-link" href={handoff.pdf_url} target="_blank" rel="noreferrer">
+            Handoff · PDF
+          </a>
+          {onConfirm && !handoff.confirmed ? (
+            <div className="chips mini">
+              <button className="chip" type="button" onClick={onConfirm}>
+                Confirm I read it
+              </button>
+            </div>
+          ) : handoff.confirmed ? (
+            <p className="quiet">Confirmed {handoff.confirmed.slice(11, 16)}</p>
+          ) : null}
         </article>
       </div>
     </section>
   )
 }
 
-function ShiftStrip({ selectedId, onSelect }) {
+function ShiftStrip({ shifts, selectedId, onSelect }) {
+  const stripRef = useRef(null)
+  useEffect(() => {
+    stripRef.current
+      ?.querySelector('[aria-pressed="true"]')
+      ?.scrollIntoView({ inline: 'center', block: 'nearest' })
+  }, [selectedId, shifts.length])
   return (
-    <div className="strip" aria-label="Shifts">
-      {SHIFTS.map((shift) => (
+    <div className="strip" ref={stripRef} aria-label="Shifts">
+      {shifts.map((shift) => (
         <button
           key={shift.id}
           className="shift"
@@ -167,14 +177,14 @@ function ShiftStrip({ selectedId, onSelect }) {
           aria-pressed={shift.id === selectedId}
           onClick={() => onSelect(shift.id)}
         >
-          {shift.chip}
+          {shift.label}
         </button>
       ))}
     </div>
   )
 }
 
-function Mast({ title = 'Doors', when, selectedId, onSelect, back, onSystems }) {
+function Mast({ title = 'Doors', when, shifts, selectedId, onSelect, back, onSystems }) {
   return (
     <header className="mast">
       {back}
@@ -186,7 +196,7 @@ function Mast({ title = 'Doors', when, selectedId, onSelect, back, onSystems }) 
       <h1 className="title">{title}</h1>
       <hr className="rust" />
       {when ? <p className="when">{when}</p> : null}
-      {onSelect ? <ShiftStrip selectedId={selectedId} onSelect={onSelect} /> : null}
+      {onSelect ? <ShiftStrip shifts={shifts} selectedId={selectedId} onSelect={onSelect} /> : null}
     </header>
   )
 }
@@ -198,48 +208,6 @@ function BackButton({ onClick }) {
         <path d="M10 2 L2 10 L10 18" fill="none" stroke="currentColor" strokeWidth="1.5" />
       </svg>
     </button>
-  )
-}
-
-function TeamsThread({ handoff, confirmed, onConfirm, onBack }) {
-  return (
-    <>
-      <div className="scroll">
-        <header className="mast">
-          <BackButton onClick={onBack} />
-          <h1 className="title">Teams · Doors</h1>
-          <hr className="rust" />
-        </header>
-        <section className="group">
-          <h2 className="group-label">Day shift</h2>
-          <div className="card">
-            <article className="note" style={{ '--bar': COLORS.method }}>
-              <p className="note-text">{handoff.paragraph}</p>
-              <a className="quiet file-link" href={handoff.pdf_url} target="_blank" rel="noreferrer">
-                Handoff · PDF
-              </a>
-            </article>
-          </div>
-        </section>
-        {confirmed ? (
-          <section className="group thread-message">
-            <h2 className="group-label">Night shift</h2>
-            <div className="card">
-              <article className="note" style={{ '--bar': COLORS.closed }}>
-                <p className="note-text">Confirmed</p>
-              </article>
-            </div>
-          </section>
-        ) : null}
-      </div>
-      {confirmed ? null : (
-        <div className="footer">
-          <button className="primary" type="button" onClick={onConfirm}>
-            Confirm
-          </button>
-        </div>
-      )}
-    </>
   )
 }
 
@@ -355,13 +323,13 @@ function Systems({ onBack }) {
 }
 
 export default function App() {
-  const [selectedId, setSelectedId] = useState(CURRENT)
+  const [shifts, setShifts] = useState([])
+  const [selectedId, setSelectedId] = useState(null)
   const [screen, setScreen] = useState('home')
-  const [day, setDay] = useState({ today: [], carried: [], handoff: null })
+  const [day, setDay] = useState({ shift: null, today: [], carried: [], received: null })
   const [past, setPast] = useState(null)
   const [stations, setStations] = useState([])
   const [freshId, setFreshId] = useState(null)
-  const [confirmed, setConfirmed] = useState(false)
   const [offline, setOffline] = useState(false)
   // sheet: { kind: 'note' | 'issue' | 'confirm' | 'respond' | 'cover', ... }
   const [sheet, setSheet] = useState(null)
@@ -377,14 +345,22 @@ export default function App() {
 
   const load = useCallback(async () => {
     try {
-      const [shift, staffing] = await Promise.all([get(`/data/shift/${CURRENT}`), get('/data/stations')])
+      const [calendar, shift, staffing] = await Promise.all([
+        get('/data/shifts'),
+        get('/data/shift/current'),
+        get('/data/stations'),
+      ])
       const ids = [...shift.today, ...shift.carried].map((note) => note.id)
       if (known.current) {
         const added = ids.filter((id) => !known.current.includes(id))
         if (added.length) setFreshId(added[added.length - 1])
       }
       known.current = ids
+      setShifts(calendar)
       setDay(shift)
+      setSelectedId((current) =>
+        calendar.some((item) => item.id === current) ? current : shift.shift.id
+      )
       setStations(staffing)
       setOffline(false)
     } catch {
@@ -420,8 +396,9 @@ export default function App() {
 
   const allNotes = [...day.carried, ...day.today]
   const openNote = sheet?.noteId ? allNotes.find((note) => note.id === sheet.noteId) : null
-  const passed = Boolean(day.handoff)
-  const shift = SHIFTS.find((item) => item.id === selectedId)
+  const activeId = day.shift?.id
+  const shift = shifts.find((item) => item.id === selectedId)
+  const nextKind = day.shift?.kind === 'day' ? 'night' : 'day'
 
   function openSheet(next) {
     setError('')
@@ -449,8 +426,8 @@ export default function App() {
   async function selectShift(id) {
     closeSheet()
     setSelectedId(id)
-    setScreen(id === 'n26' && passed ? 'teams' : 'home')
-    if (id !== CURRENT && id !== 'n26') {
+    setScreen('home')
+    if (shifts.find((item) => item.id === id)?.status === 'passed') {
       setPast(null)
       get(`/data/shift/${id}`).then(setPast).catch(() => setPast({ handoff: null }))
     }
@@ -529,10 +506,16 @@ export default function App() {
 
   const passShift = () =>
     run(async () => {
-      await post('/data/handoffs', { paragraph })
+      const passed = await post('/data/handoffs', { paragraph })
+      setSelectedId(passed.active)
+      setScreen('home')
       await load()
-      setSelectedId('n26')
-      setScreen('teams')
+    })
+
+  const confirmReceived = () =>
+    run(async () => {
+      await post(`/data/handoffs/${day.received.id}/confirm`)
+      load()
     })
 
   const onOpen = (note) => openSheet({ kind: 'issue', noteId: note.id })
@@ -541,29 +524,17 @@ export default function App() {
   let body
   if (screen === 'systems') {
     body = <Systems onBack={() => setScreen('home')} />
-  } else if (screen === 'teams' && day.handoff) {
-    body = (
-      <TeamsThread
-        handoff={day.handoff}
-        confirmed={confirmed}
-        onConfirm={() => setConfirmed(true)}
-        onBack={() => {
-          setSelectedId(CURRENT)
-          setScreen('home')
-        }}
-      />
-    )
   } else if (screen === 'review') {
     body = (
       <>
         <div className="scroll">
           <Mast
-            title="Handoff to night shift"
-            when="Doors · Sat 26 Sep"
+            title={`Handoff to ${nextKind} shift`}
+            when={`Doors · ${day.shift?.when ?? ''}`}
             back={<BackButton onClick={() => setScreen('home')} />}
           />
           <section className="group">
-            <h2 className="group-label">For the night shift</h2>
+            <h2 className="group-label">For the {nextKind} shift</h2>
             <div className="card">
               <article className="note" style={{ '--bar': COLORS.method }}>
                 {paragraph ? (
@@ -587,35 +558,50 @@ export default function App() {
           <button
             className="primary"
             type="button"
-            disabled={!paragraph || busy || passed}
+            disabled={!paragraph || busy}
             onClick={passShift}
           >
-            {passed ? 'Passed' : busy ? 'Passing…' : 'Pass to next shift'}
+            {busy ? 'Passing…' : 'Pass to next shift'}
           </button>
         </div>
       </>
     )
-  } else if (selectedId === 'n26') {
+  } else if (!shift) {
     body = (
       <div className="scroll">
-        <Mast when={shift.when} selectedId={selectedId} onSelect={selectShift} />
+        <Mast />
+        <p className="empty">{offline ? 'Cannot reach the plant systems.' : 'Loading…'}</p>
+      </div>
+    )
+  } else if (shift.status === 'next') {
+    body = (
+      <div className="scroll">
+        <Mast when={shift.when} shifts={shifts} selectedId={selectedId} onSelect={selectShift} />
         <p className="empty">Nothing passed yet.</p>
       </div>
     )
-  } else if (selectedId === CURRENT) {
+  } else if (selectedId === activeId) {
     const today = day.today.length ? [{ label: 'Today', notes: day.today }] : []
     body = (
       <>
         <div className="scroll">
           <Mast
             when={shift.when}
+            shifts={shifts}
             selectedId={selectedId}
             onSelect={selectShift}
             onSystems={() => setScreen('systems')}
           />
           {offline ? <p className="empty">Cannot reach the plant systems.</p> : null}
+          {day.received ? (
+            <HandoffCard
+              label={`From the ${nextKind} shift`}
+              handoff={day.received}
+              onConfirm={confirmReceived}
+            />
+          ) : null}
           <Stations stations={stations} onCover={openCover} />
-          {day.carried.length ? <p className="kicker">From last night</p> : null}
+          {day.carried.length ? <p className="kicker">From earlier shifts</p> : null}
           <Groups
             groups={groupsFromNotes(day.carried)}
             freshId={freshId}
@@ -660,13 +646,10 @@ export default function App() {
   } else {
     body = (
       <div className="scroll">
-        <Mast when={shift.when} selectedId={selectedId} onSelect={selectShift} />
+        <Mast when={shift.when} shifts={shifts} selectedId={selectedId} onSelect={selectShift} />
         {past?.handoff ? (
           <>
-            <HandoffDraft text={past.handoff.paragraph} />
-            <a className="quiet file-link" href={past.handoff.pdf_url} target="_blank" rel="noreferrer">
-              Handoff · PDF
-            </a>
+            <HandoffCard label="Passed on" handoff={past.handoff} />
             <p className="kicker">Handoff</p>
             <Groups groups={past.handoff.groups} />
           </>

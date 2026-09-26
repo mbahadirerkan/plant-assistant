@@ -16,7 +16,9 @@ python backends/app.py
 $env:GEMINI_API_KEY="..."; python agent/server.py
 cd web; npm install; npm run dev
 ```
-App: http://localhost:5173 · Control page (fire line warnings, see SAP/tickets change): http://localhost:8001
+App: http://localhost:5173 · Control page (fire line warnings, see SAP/tickets change, reset the demo): http://localhost:8001
+
+"Pass to next shift" moves the calendar on (day → night → next day). History starts 3 shifts before today.
 
 Add a system: write an MCP server in `mcp_servers/`, add an entry to `SYSTEMS` in `agent/server.py`.
 Busy model (503)? The agent retries and switches to backup models automatically (picked from your key's models at startup, or set `LLM_FALLBACKS`). List models your key can use: `python agent/server.py --models`.

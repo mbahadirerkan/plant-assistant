@@ -39,7 +39,7 @@ API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY") or "none"
 FALLBACKS = [m.strip() for m in os.getenv("LLM_FALLBACKS", "").split(",") if m.strip()]
 
 CONTEXT = """You work inside Passdown, the shift notebook of the supervisor of the Doors line (stations 12 and 14) in a car plant.
-Current shift: 'd26' (Sat 26 Sep, day). Previous: 'n25'. Use tools for facts; never invent people, numbers or events.
+Active shift: {when} (id {id}). Use tools for facts; never invent people, numbers or events.
 Write like Passdown: short, plain, factual sentences. No markdown."""
 
 llm = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY, max_retries=0)
@@ -80,7 +80,8 @@ async def complete(**kw):
 
 async def ask_llm(task, final_tool, history=None, use_tools=True):
     """Run a tool loop until the model calls final_tool; returns its arguments."""
-    msgs = [{"role": "system", "content": CONTEXT}] + (history or []) + [{"role": "user", "content": task}]
+    shift = (await data("GET", "/shift/current"))["shift"]
+    msgs = [{"role": "system", "content": CONTEXT.format(**shift)}] + (history or []) + [{"role": "user", "content": task}]
     fn = (tools if use_tools else []) + [final_tool]
     name = final_tool["function"]["name"]
     for _ in range(8):
@@ -169,6 +170,12 @@ async def enrich(note):
     notify()
 
 
+@app.post("/refresh")
+async def refresh():
+    notify()
+    return {"ok": True}
+
+
 @app.post("/events")
 async def on_event(note: dict):
     notify()
@@ -225,9 +232,10 @@ async def classify(w: Words):
 # ---- Draft the handoff paragraph from the log ----
 @app.post("/api/handoff")
 async def handoff():
-    shift, staffing, tickets = await asyncio.gather(data("GET", "/shift/d26"), data("GET", "/stations"), data("GET", "/tickets"))
+    shift, staffing, tickets = await asyncio.gather(data("GET", "/shift/current"), data("GET", "/stations"), data("GET", "/tickets"))
+    nxt = "night" if shift["shift"]["kind"] == "day" else "day"
     return await ask_llm(
-        f"Write the handoff for the night shift from this data only. Shift log: {json.dumps(shift)}. "
+        f"Write the handoff for the {nxt} shift from this data only. Shift log: {json.dumps(shift)}. "
         f"Staffing: {json.dumps(staffing)}. Maintenance tickets: {json.dumps(tickets)}. "
         "4-6 short sentences: who is on which station, what is still open, what was done, what the next shift must know "
         "(including anything done outside the official method).",
