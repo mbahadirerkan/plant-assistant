@@ -112,8 +112,24 @@ async def data(method, path, **kw):
         return r.json()
 
 
+async def pick_fallbacks():
+    """No LLM_FALLBACKS set: use up to 2 other text 'flash' models this key can access."""
+    if FALLBACKS:
+        return
+    try:
+        ids = [m.id.removeprefix("models/") async for m in llm.models.list()]
+    except Exception as e:
+        print("could not list models, no fallbacks:", e)
+        return
+    skip = ("image", "tts", "audio", "live", "embedding", "vision", "exp", "preview")
+    picks = sorted((i for i in ids if "flash" in i and i != MODEL and not any(k in i for k in skip)), reverse=True)
+    FALLBACKS.extend(picks[:2])
+    print(f"model: {MODEL} | fallbacks: {', '.join(FALLBACKS) or 'none'}")
+
+
 @asynccontextmanager
 async def lifespan(app):
+    await pick_fallbacks()
     async with AsyncExitStack() as stack:
         for s in SYSTEMS:
             params = StdioServerParameters(command=sys.executable, args=[str(ROOT / "mcp_servers" / s["file"])])

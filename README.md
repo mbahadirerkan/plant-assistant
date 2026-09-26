@@ -19,5 +19,5 @@ cd web; npm install; npm run dev
 App: http://localhost:5173 · Control page (fire line warnings, see SAP/tickets change): http://localhost:8001
 
 Add a system: write an MCP server in `mcp_servers/`, add an entry to `SYSTEMS` in `agent/server.py`.
-Busy model (503)? The agent retries, then tries `LLM_FALLBACKS` (comma-separated). List models your key can use: `python agent/server.py --models`.
+Busy model (503)? The agent retries and switches to backup models automatically (picked from your key's models at startup, or set `LLM_FALLBACKS`). List models your key can use: `python agent/server.py --models`.
 Other models: set `LLM_MODEL`, or `LLM_BASE_URL` for any OpenAI-compatible provider (e.g. Ollama).
