@@ -274,8 +274,21 @@ function Systems({ onBack }) {
   const [busy, setBusy] = useState(false)
   const endRef = useRef(null)
 
+  // Keep asking until the agent answers: it may be starting or restarting when Giga Hub opens.
   useEffect(() => {
-    get('/api/systems').then(setSystems).catch(() => setSystems([]))
+    let timer
+    let stopped = false
+    const load = () =>
+      get('/api/systems')
+        .then((list) => !stopped && setSystems(list))
+        .catch(() => {
+          if (!stopped) timer = window.setTimeout(load, 3000)
+        })
+    load()
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+    }
   }, [])
 
   // Each connected system has its own color; new systems without one get a spare color.
@@ -330,11 +343,17 @@ function Systems({ onBack }) {
                       {example}
                     </button>
                   ))}
+                  {(system.actions || []).map((action) => (
+                    <button key={action} className="chip action-chip" type="button" onClick={() => ask(action)}>
+                      {action}
+                    </button>
+                  ))}
                 </div>
               </article>
             ))}
           </div>
         </section>
+        {!systems.length ? <p className="quiet">Connecting to the plant systems…</p> : null}
         {turns.map((turn, i) => (
           <section className="group" key={i}>
             <h2 className="group-label">{turn.q}</h2>

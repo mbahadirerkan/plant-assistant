@@ -794,3 +794,14 @@ input:focus-visible {
   animation: fadein 180ms ease;
 }
 
+
+.action-chip {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--card);
+}
+
+.action-chip::before {
+  content: '→ ';
+  color: var(--rust);
+}

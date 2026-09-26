@@ -27,11 +27,14 @@ SYSTEMS = [
     {"file": "line_mcp.py", "name": "Line dashboard", "color": "#F26B1D", "about": "Live status of the Doors line",
      "examples": ["How is the line doing?"]},
     {"file": "hr_mcp.py", "name": "SAP HR", "color": "#3E6AE1", "about": "People, certifications, staffing",
-     "examples": ["Who is certified for station 14?", "Who has been absent this month?"]},
+     "examples": ["Who is certified for station 14?", "Who has been absent this month?"],
+     "actions": ["Assign Nora to station 14", "Set Mehmet's performance to Good"]},
     {"file": "maintenance_mcp.py", "name": "Maintenance", "color": "#7B61FF", "about": "Maintenance tickets",
-     "examples": ["Which tickets are open?"]},
+     "examples": ["Which tickets are open?"],
+     "actions": ["Open a ticket for the station 14 lift"]},
     {"file": "shiftlog_mcp.py", "name": "Shift log", "color": "#1FA463", "about": "Issues, responses and handoffs",
-     "examples": ["Summarize the last 3 days", "What is still open from last night?"]},
+     "examples": ["Summarize the last 3 days", "What is still open from last night?"],
+     "actions": ["Close the station 12 clips issue"]},
 ]
 
 # Claude when ANTHROPIC_API_KEY is set; otherwise any OpenAI-compatible provider (default Gemini,
@@ -317,7 +320,7 @@ async def handoff():
 # ---- Giga Hub page: list systems and answer questions ----
 @app.get("/api/systems")
 def systems():
-    return [{k: s.get(k) for k in ("name", "color", "about", "examples", "tools")} | {"connected": True} for s in SYSTEMS]
+    return [{k: s.get(k) for k in ("name", "color", "about", "examples", "actions", "tools")} | {"connected": True} for s in SYSTEMS]
 
 
 class Ask(BaseModel):
