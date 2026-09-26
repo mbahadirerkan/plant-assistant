@@ -680,3 +680,16 @@ input:focus-visible {
 .shift-now {
   color: var(--ink);
 }
+
+.footer .text-btn {
+  margin-bottom: 10px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  text-align: center;
+}
+
+.footer .text-btn:hover {
+  border-color: var(--ink);
+}
