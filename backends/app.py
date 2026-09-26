@@ -1,6 +1,7 @@
 """Fake plant systems behind Passdown: SAP HR, line (MES), maintenance, shift log. Reseeded on every start."""
 import datetime as dt
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -355,4 +356,5 @@ def home():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, port=8001)
+    uvicorn.run(app, port=8001, timeout_graceful_shutdown=1)
+    os._exit(0)  # don't wait on leftover connections or MCP processes

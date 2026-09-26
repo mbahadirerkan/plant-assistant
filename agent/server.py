@@ -262,4 +262,5 @@ if __name__ == "__main__":
                 print(m.id)
         asyncio.run(show())
     else:
-        uvicorn.run(app, port=8000)
+        uvicorn.run(app, port=8000, timeout_graceful_shutdown=1)
+        os._exit(0)  # don't wait on leftover connections or MCP processes
