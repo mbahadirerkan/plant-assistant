@@ -114,11 +114,17 @@ async def ask_llm(task, final_tool, history=None, use_tools=True):
         r = await complete(messages=msgs, tools=fn, tool_choice="required")
         m = r.choices[0].message
         msgs.append(m.model_dump(exclude_none=True))  # keeps provider extras (e.g. Gemini thought signatures)
-        for tc in m.tool_calls or []:
+        result = None
+        for tc in m.tool_calls or []:  # run every tool call of this turn before returning the final result
             args = json.loads(tc.function.arguments or "{}")
             if tc.function.name == name:
-                return args
-            msgs.append({"role": "tool", "tool_call_id": tc.id, "content": await run_tool(tc.function.name, args)})
+                result = args
+                out = "Received."
+            else:
+                out = await run_tool(tc.function.name, args)
+            msgs.append({"role": "tool", "tool_call_id": tc.id, "content": out})
+        if result is not None:
+            return result
     raise RuntimeError("The model did not finish.")
 
 
@@ -153,10 +159,12 @@ async def ask_claude(system, msgs, final_tool, use_tools):
         if not uses:  # answered in text instead of the final tool: ask once more
             msgs.append({"role": "user", "content": f"Call the {name} tool with your result."})
             continue
-        for b in uses:
-            if b.name == name:
-                return b.input
-        results = [{"type": "tool_result", "tool_use_id": b.id, "content": await run_tool(b.name, b.input)} for b in uses]
+        # Claude often calls several tools at once: run them all before accepting the final result.
+        results = [{"type": "tool_result", "tool_use_id": b.id,
+                    "content": "Received." if b.name == name else await run_tool(b.name, b.input)} for b in uses]
+        final_use = next((b for b in uses if b.name == name), None)
+        if final_use:
+            return final_use.input
         msgs.append({"role": "user", "content": results})
     raise RuntimeError("The model did not finish.")
 
@@ -319,13 +327,17 @@ class Ask(BaseModel):
 
 @app.post("/api/ask")
 async def ask(a: Ask):
-    return await ask_llm(
-        a.text + "\n\n(Answer in 1-4 short sentences. Do not change anything in any system; if the supervisor wants a change, "
-                 "say what you would do. chips: up to 3 short follow-up questions they might ask next. "
+    r = await ask_llm(
+        a.text + "\n\n(If the supervisor clearly asks for a change - assign someone, open a ticket, update HR, close an "
+                 "issue - make it with your tools first, then say exactly what changed, using what the tool returned. "
+                 "If the request is unclear, ask instead of guessing. Answer in 1-4 short sentences. "
+                 "chips: up to 3 short follow-up questions they might ask next. "
                  "sources: names of the systems you used, from: Line dashboard, SAP HR, Maintenance, Shift log.)",
         final("answer", {"answer": {"type": "string"}, "chips": {"type": "array", "items": {"type": "string"}},
                          "sources": {"type": "array", "items": {"type": "string"}}}),
         history=a.history)
+    notify()  # a change may have been made: refresh open screens
+    return r
 
 
 @app.get("/api/stream")
