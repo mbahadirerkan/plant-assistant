@@ -1,12 +1,12 @@
 // Static labels only. Shifts and all shift data come from the backend (/data) and the AI (/api).
 export const COLORS = {
-  open: '#9E2B23',
-  part: '#1F4E79',
-  quality: '#6B3FA0',
-  machine: '#8A3B12',
-  method: '#8A5A00',
-  closed: '#2C6B4A',
-  check: '#1F4E79',
+  open: '#E82127',
+  part: '#3E6AE1',
+  quality: '#7B61FF',
+  machine: '#F26B1D',
+  method: '#C9A227',
+  closed: '#1FA463',
+  check: '#3E6AE1',
 }
 
 export const NOTE_TYPES = [

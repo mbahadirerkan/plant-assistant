@@ -1,9 +1,9 @@
-# Passdown + plant systems (hackathon MVP)
+# Teslog (hackathon MVP)
 
-Passdown (the shift notebook, from tarikemal/passdown) running on live plant data, with an AI that reads and acts on the systems through MCP.
+Teslog: the shift notebook (UI based on tarikemal/passdown) running on live plant data, with an AI that reads and acts on the systems through MCP.
 
 ```
-web/              Passdown UI (React + Vite)                               :5173
+web/              Teslog UI (React + Vite)                                 :5173
 agent/server.py   AI: enriches line issues, runs actions, structures responses, drafts handoffs   :8000
 mcp_servers/      one adapter per system: line, SAP HR, maintenance, shift log
 backends/app.py   fake plant systems + demo control page (reseeds on start)                   :8001

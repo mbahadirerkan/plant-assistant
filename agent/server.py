@@ -1,4 +1,4 @@
-"""AI side of Passdown: connects the MCP servers and serves the AI endpoints on :8000."""
+"""AI side of Teslog: connects the MCP servers and serves the AI endpoints on :8000."""
 import asyncio
 import json
 import os
@@ -38,9 +38,9 @@ API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY") or "none"
 # Tried in order when the main model is overloaded (503) or rate limited (429), e.g. LLM_FALLBACKS=model-a,model-b
 FALLBACKS = [m.strip() for m in os.getenv("LLM_FALLBACKS", "").split(",") if m.strip()]
 
-CONTEXT = """You work inside Passdown, the shift notebook of the supervisor of the Doors line (stations 12 and 14) in a car plant.
+CONTEXT = """You work inside Teslog, the shift notebook of the supervisor of the Doors line (stations 12 and 14) in a car plant.
 Active shift: {when} (id {id}). Use tools for facts; never invent people, numbers or events.
-Write like Passdown: short, plain, factual sentences. No markdown."""
+Write like Teslog: short, plain, factual sentences. No markdown."""
 
 llm = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY, max_retries=0)
 tools, route, subscribers = [], {}, set()
@@ -219,7 +219,7 @@ async def structure(nid: int, w: Words):
                          "follow_up": {"type": "string"}}))
 
 
-# ---- Sort a free note into a Passdown type ----
+# ---- Sort a free note into a Teslog type ----
 @app.post("/api/classify")
 async def classify(w: Words):
     return await ask_llm(
@@ -242,7 +242,7 @@ async def handoff():
         final("handoff", {"paragraph": {"type": "string"}}), use_tools=False)
 
 
-# ---- Systems page: list systems and answer questions ----
+# ---- Giga Hub page: list systems and answer questions ----
 @app.get("/api/systems")
 def systems():
     return [{k: s[k] for k in ("name", "about", "examples", "tools")} | {"connected": True} for s in SYSTEMS]

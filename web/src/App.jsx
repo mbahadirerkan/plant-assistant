@@ -184,13 +184,13 @@ function ShiftStrip({ shifts, selectedId, onSelect }) {
   )
 }
 
-function Mast({ title = 'Doors', when, shifts, selectedId, onSelect, back, onSystems }) {
+function Mast({ title = 'Teslog', when, shifts, selectedId, onSelect, back, onSystems }) {
   return (
     <header className="mast">
       {back}
       {onSystems ? (
         <button className="systems-btn" type="button" onClick={onSystems}>
-          Systems
+          Giga Hub
         </button>
       ) : null}
       <h1 className="title">{title}</h1>
@@ -249,7 +249,7 @@ function Systems({ onBack }) {
   return (
     <>
       <div className="scroll">
-        <Mast title="Systems" when="Connected to Passdown" back={<BackButton onClick={onBack} />} />
+        <Mast title="Giga Hub" when="Plant systems connected to Teslog" back={<BackButton onClick={onBack} />} />
         <section className="group">
           <div className="card">
             {systems.map((system) => (
@@ -530,7 +530,7 @@ export default function App() {
         <div className="scroll">
           <Mast
             title={`Handoff to ${nextKind} shift`}
-            when={`Doors · ${day.shift?.when ?? ''}`}
+            when={`Doors line · ${day.shift?.when ?? ''}`}
             back={<BackButton onClick={() => setScreen('home')} />}
           />
           <section className="group">

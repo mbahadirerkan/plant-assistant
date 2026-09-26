@@ -1,4 +1,4 @@
-"""Fake plant systems behind Passdown: SAP HR, line (MES), maintenance, shift log. Reseeded on every start."""
+"""Fake plant systems behind Teslog: SAP HR, line (MES), maintenance, shift log. Reseeded on every start."""
 import datetime as dt
 import json
 import os
@@ -154,7 +154,7 @@ def handoff_dict(h):
     return {**dict(h), "groups": json.loads(h["groups"]), "pdf_url": f"/data/handoffs/{h['id']}/pdf"} if h else None
 
 
-# ---- Shift log (Passdown's data) ----
+# ---- Shift log (Teslog's data) ----
 @app.get("/shifts")
 def shifts():
     rows = [shift_info(r["id"], r["status"]) for r in db().execute("select * from shifts order by id")]
@@ -375,7 +375,7 @@ def handoff_pdf(hid: int):
         pdf.set_x(pdf.l_margin + indent)
         pdf.multi_cell(w - indent, h, latin(text), new_x="LMARGIN", new_y="NEXT")
 
-    line(f"Doors - handoff {shift_info(h['shift'], '')['when']}", 18, "B", 10)
+    line(f"Teslog - Doors line handoff - {shift_info(h['shift'], '')['when']}", 18, "B", 10)
     line(f"Passed {h['ts'].replace('T', ' ')}", 9)
     pdf.ln(3)
     line(h["paragraph"])

@@ -1,12 +1,12 @@
 :root {
   color-scheme: light;
-  --concrete: #e6e1d6;
-  --paper: #f7f4ee;
-  --card: #fcfbf8;
-  --ink: #1c1b17;
-  --secondary: #6e6a62;
-  --line: #e3ddd2;
-  --rust: #9e2b23;
+  --concrete: #e2e3e5;
+  --paper: #f4f4f4;
+  --card: #ffffff;
+  --ink: #171a20;
+  --secondary: #5c5e62;
+  --line: #d0d1d2;
+  --rust: #e82127;
   --phone-scale: 1;
 }
 
@@ -46,7 +46,7 @@ input:focus-visible {
 }
 
 ::selection {
-  background: #e4d3c4;
+  background: #d0d1d2;
 }
 
 .stage {
@@ -68,7 +68,7 @@ input:focus-visible {
   transform-origin: top left;
   background: var(--paper);
   border-radius: 28px;
-  box-shadow: 0 22px 50px rgba(28, 27, 23, 0.16);
+  box-shadow: 0 22px 50px rgba(23, 26, 32, 0.18);
   overflow: hidden;
   position: relative;
 }
@@ -341,7 +341,7 @@ input:focus-visible {
 .scrim {
   position: absolute;
   inset: 0;
-  background: rgba(28, 27, 23, 0.28);
+  background: rgba(23, 26, 32, 0.4);
   border: 0;
   padding: 0;
 }
@@ -498,7 +498,7 @@ input:focus-visible {
 }
 
 .cover-choice.needs {
-  box-shadow: inset 3px 0 0 #8a5a00;
+  box-shadow: inset 3px 0 0 #c9a227;
 }
 
 .cover-name {
