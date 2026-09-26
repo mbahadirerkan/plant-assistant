@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+import openai
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
@@ -34,12 +35,14 @@ SYSTEMS = [
 BASE_URL = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
 MODEL = os.getenv("LLM_MODEL", "gemini-3.8-flash")
 API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY") or "none"
+# Tried in order when the main model is overloaded (503) or rate limited (429), e.g. LLM_FALLBACKS=model-a,model-b
+FALLBACKS = [m.strip() for m in os.getenv("LLM_FALLBACKS", "").split(",") if m.strip()]
 
 CONTEXT = """You work inside Passdown, the shift notebook of the supervisor of the Doors line (stations 12 and 14) in a car plant.
 Current shift: 'd26' (Sat 26 Sep, day). Previous: 'n25'. Use tools for facts; never invent people, numbers or events.
 Write like Passdown: short, plain, factual sentences. No markdown."""
 
-llm = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
+llm = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY, max_retries=0)
 tools, route, subscribers = [], {}, set()
 
 
@@ -61,13 +64,27 @@ def final(name, props, required=None):
             "parameters": {"type": "object", "properties": props, "required": required or list(props)}}}
 
 
+async def complete(**kw):
+    """Retry busy/rate-limited calls with backoff, trying fallback models on each round."""
+    error = None
+    for attempt in range(4):
+        for model in [MODEL] + FALLBACKS:
+            try:
+                return await llm.chat.completions.create(model=model, **kw)
+            except (openai.InternalServerError, openai.RateLimitError, openai.APIConnectionError, openai.APITimeoutError) as e:
+                error = e
+                print(f"{model} busy ({getattr(e, 'status_code', 'no connection')}), trying next")
+        await asyncio.sleep(2 ** attempt)
+    raise error
+
+
 async def ask_llm(task, final_tool, history=None, use_tools=True):
     """Run a tool loop until the model calls final_tool; returns its arguments."""
     msgs = [{"role": "system", "content": CONTEXT}] + (history or []) + [{"role": "user", "content": task}]
     fn = (tools if use_tools else []) + [final_tool]
     name = final_tool["function"]["name"]
     for _ in range(8):
-        r = await llm.chat.completions.create(model=MODEL, messages=msgs, tools=fn, tool_choice="required")
+        r = await complete(messages=msgs, tools=fn, tool_choice="required")
         m = r.choices[0].message
         msgs.append(m.model_dump(exclude_none=True))  # keeps provider extras (e.g. Gemini thought signatures)
         for tc in m.tool_calls or []:
@@ -239,4 +256,10 @@ async def stream():
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, port=8000)
+    if "--models" in sys.argv:  # list the models your key can use
+        async def show():
+            async for m in llm.models.list():
+                print(m.id)
+        asyncio.run(show())
+    else:
+        uvicorn.run(app, port=8000)
