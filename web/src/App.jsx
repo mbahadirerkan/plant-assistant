@@ -473,16 +473,24 @@ export default function App() {
     load()
     const events = new EventSource('/api/stream')
     events.onmessage = () => load()
+    // Poll as well: live updates can be missed (e.g. while the stream is still connecting).
+    const poll = window.setInterval(() => {
+      if (document.visibilityState === 'visible') load()
+    }, 3000)
+    const onVisible = () => document.visibilityState === 'visible' && load()
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       window.removeEventListener('resize', fitPhone)
+      document.removeEventListener('visibilitychange', onVisible)
       events.close()
+      window.clearInterval(poll)
     }
   }, [load])
 
   useEffect(() => {
     if (!freshId) return
     document.getElementById(`note-${freshId}`)?.scrollIntoView({ block: 'nearest' })
-  }, [freshId, day])
+  }, [freshId])
 
   useEffect(() => {
     if (!sheet) return undefined
