@@ -1,197 +1,241 @@
-"""Agent: threads + Claude tool loop over MCP servers. Serves the chat UI on :8000."""
+"""AI side of Passdown: connects the MCP servers and serves the AI endpoints on :8000."""
 import asyncio
-import datetime as dt
 import json
+import os
 import sys
-import uuid
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
-import os
-
+import httpx
 import uvicorn
-from openai import AsyncOpenAI
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parent.parent
-MCP_SERVERS = ["hr_mcp.py", "line_mcp.py", "handover_mcp.py"]  # add a server here to add capabilities
-# Any OpenAI-compatible provider. Default: Gemini (free tier). Ollama: LLM_BASE_URL=http://localhost:11434/v1
+DATA = "http://localhost:8001"
+
+# Connected systems. To add one: write an MCP server in mcp_servers/ and add an entry here.
+SYSTEMS = [
+    {"file": "line_mcp.py", "name": "Line dashboard", "about": "Live status of the Doors line",
+     "examples": ["How is the line doing?"]},
+    {"file": "hr_mcp.py", "name": "SAP HR", "about": "People, certifications, staffing",
+     "examples": ["Who is certified for station 14?", "Who has been absent this month?"]},
+    {"file": "maintenance_mcp.py", "name": "Maintenance", "about": "Maintenance tickets",
+     "examples": ["Which tickets are open?"]},
+    {"file": "shiftlog_mcp.py", "name": "Shift log", "about": "Issues, responses and handoffs",
+     "examples": ["Summarize the last 3 days", "What is still open from last night?"]},
+]
+
+# Any OpenAI-compatible provider. Default: Gemini. Ollama: LLM_BASE_URL=http://localhost:11434/v1
 BASE_URL = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
 MODEL = os.getenv("LLM_MODEL", "gemini-3.8-flash")
 API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY") or "none"
 
-SYSTEM = f"""You are the assistant of a shift supervisor in a car plant (lines L1 body shop, L2 paint, L3 welding).
-Today is {dt.date.today()}. Use tools to get real data; never invent numbers or people.
-Always finish by calling `respond` with: summary (one line), body (short, plain text, may use - bullets), and exactly 3 actions (short next steps the supervisor may tap).
-Before any change to HR data, show what will change and offer "Confirm" as the first action; only call update tools after the supervisor confirms.
-For a shift report: gather the shift events, write the report, save it with save_report, and attach the pdf_url."""
-
-RESPOND = {
-    "name": "respond",
-    "description": "Send your reply to the supervisor. Every turn must end with this.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "summary": {"type": "string"},
-            "body": {"type": "string"},
-            "actions": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3},
-            "attachments": {"type": "array", "items": {"type": "object", "properties": {
-                "label": {"type": "string"}, "url": {"type": "string"}}, "required": ["label", "url"]}},
-        },
-        "required": ["summary", "body", "actions"],
-    },
-}
+CONTEXT = """You work inside Passdown, the shift notebook of the supervisor of the Doors line (stations 12 and 14) in a car plant.
+Current shift: 'd26' (Sat 26 Sep, day). Previous: 'n25'. Use tools for facts; never invent people, numbers or events.
+Write like Passdown: short, plain, factual sentences. No markdown."""
 
 llm = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
-tools, route = [], {}
-threads: dict[str, dict] = {}
-subscribers: set[asyncio.Queue] = set()
+tools, route, subscribers = [], {}, set()
 
 
-def new_thread(title, event=None, first=None):
-    t = {"id": uuid.uuid4().hex[:8], "title": title, "event": event, "created": dt.datetime.now().isoformat(timespec="seconds"),
-         "unread": True, "busy": False, "history": [], "messages": [], "lock": asyncio.Lock()}
-    if first:
-        t["messages"].append({"role": "assistant", **first})
-    threads[t["id"]] = t
-    notify(t["id"])
-    return t
+def clean(schema):
+    """Simplify MCP JSON schemas for providers with strict schema support (e.g. Gemini)."""
+    if isinstance(schema, list):
+        return [clean(s) for s in schema]
+    if not isinstance(schema, dict):
+        return schema
+    s = {k: clean(v) for k, v in schema.items() if k not in ("title", "default", "additionalProperties")}
+    opts = [o for o in s.pop("anyOf", []) if o.get("type") != "null"]
+    if opts:
+        s.update(opts[0])
+    return s
 
 
-def notify(tid):
+def final(name, props, required=None):
+    return {"type": "function", "function": {"name": name, "description": "Return your final result with this.",
+            "parameters": {"type": "object", "properties": props, "required": required or list(props)}}}
+
+
+async def ask_llm(task, final_tool, history=None, use_tools=True):
+    """Run a tool loop until the model calls final_tool; returns its arguments."""
+    msgs = [{"role": "system", "content": CONTEXT}] + (history or []) + [{"role": "user", "content": task}]
+    fn = (tools if use_tools else []) + [final_tool]
+    name = final_tool["function"]["name"]
+    for _ in range(8):
+        r = await llm.chat.completions.create(model=MODEL, messages=msgs, tools=fn, tool_choice="required")
+        m = r.choices[0].message
+        msgs.append(m.model_dump(exclude_none=True))  # keeps provider extras (e.g. Gemini thought signatures)
+        for tc in m.tool_calls or []:
+            args = json.loads(tc.function.arguments or "{}")
+            if tc.function.name == name:
+                return args
+            try:
+                res = await route[tc.function.name].call_tool(tc.function.name, args)
+                out = "\n".join(c.text for c in res.content if hasattr(c, "text"))
+            except Exception as e:
+                out = f"Error: {e}"
+            msgs.append({"role": "tool", "tool_call_id": tc.id, "content": out})
+    raise RuntimeError("The model did not finish.")
+
+
+def notify(msg="refresh"):
     for q in subscribers:
-        q.put_nowait(tid)
+        q.put_nowait(msg)
 
 
-def public(t, full=False):
-    last = t["messages"][-1] if t["messages"] else {}
-    d = {k: t[k] for k in ("id", "title", "event", "created", "unread", "busy")}
-    d["preview"] = last.get("summary") or last.get("text", "")
-    if full:
-        d["messages"] = t["messages"]
-    return d
-
-
-async def run_agent(t, text):
-    h = t["history"]
-    h.append({"role": "user", "content": text})
-    used = []
-    fn_tools = [{"type": "function", "function": f} for f in tools + [RESPOND]]
-    for _ in range(10):
-        resp = await llm.chat.completions.create(model=MODEL, messages=[{"role": "system", "content": SYSTEM}] + h,
-                                                 tools=fn_tools, tool_choice="required")
-        msg = resp.choices[0].message
-        h.append(msg.model_dump(exclude_none=True))  # keeps provider extras (e.g. Gemini thought signatures)
-        reply = None
-        for tc in msg.tool_calls or []:
-            name, args = tc.function.name, json.loads(tc.function.arguments or "{}")
-            if name == "respond":
-                reply, out = args, "Shown to supervisor."
-            else:
-                used.append(name)
-                try:
-                    r = await route[name].call_tool(name, args)
-                    out = "\n".join(c.text for c in r.content if hasattr(c, "text"))
-                except Exception as e:
-                    out = f"Error: {e}"
-            h.append({"role": "tool", "tool_call_id": tc.id, "content": out})
-        if not msg.tool_calls and msg.content:  # model answered in plain text
-            reply = {"summary": msg.content.split("\n")[0][:120], "body": msg.content, "actions": []}
-        if reply:
-            reply.setdefault("actions", [])
-            return {**reply, "tools": used}
-    return {"summary": "Could not finish.", "body": "Please try again.", "actions": [], "tools": used}
-
-
-async def handle(t, text, show_user=True):
-    async with t["lock"]:
-        if show_user:
-            t["messages"].append({"role": "supervisor", "text": text})
-        t["busy"] = True
-        notify(t["id"])
-        try:
-            reply = await run_agent(t, text)
-        except Exception as e:
-            reply = {"summary": "Error", "body": str(e), "actions": []}
-        t["messages"].append({"role": "assistant", **reply})
-        t["busy"], t["unread"] = False, True
-        notify(t["id"])
+async def data(method, path, **kw):
+    async with httpx.AsyncClient(base_url=DATA) as c:
+        r = await c.request(method, path, **kw)
+        r.raise_for_status()
+        return r.json()
 
 
 @asynccontextmanager
 async def lifespan(app):
     async with AsyncExitStack() as stack:
-        for f in MCP_SERVERS:
-            params = StdioServerParameters(command=sys.executable, args=[str(ROOT / "mcp_servers" / f)])
+        for s in SYSTEMS:
+            params = StdioServerParameters(command=sys.executable, args=[str(ROOT / "mcp_servers" / s["file"])])
             r, w = await stack.enter_async_context(stdio_client(params))
-            s = await stack.enter_async_context(ClientSession(r, w))
-            await s.initialize()
-            for tl in (await s.list_tools()).tools:
-                tools.append({"name": tl.name, "description": tl.description or "", "parameters": tl.input_schema})
-                route[tl.name] = s
-        new_thread("General", first={"summary": "Ask me anything about your shift.", "body": "I can reach SAP HR, the line dashboard and the shift log.",
-                                     "actions": ["Give me the last shift's report", "Summarize the last 3 days", "How are the lines doing?"]})
+            sess = await stack.enter_async_context(ClientSession(r, w))
+            await sess.initialize()
+            s["tools"] = []
+            for t in (await sess.list_tools()).tools:
+                tools.append({"type": "function", "function": {
+                    "name": t.name, "description": t.description or "", "parameters": clean(t.input_schema)}})
+                route[t.name] = sess
+                s["tools"].append(t.name)
         yield
 
 
 app = FastAPI(lifespan=lifespan)
 
 
+@app.exception_handler(Exception)
+async def ai_error(request: Request, e: Exception):
+    return PlainTextResponse(f"The assistant is unavailable: {str(e)[:150]}", status_code=502)
+
+
+# ---- A new issue arrives from the line: add one factual line and suggested actions ----
+async def enrich(note):
+    try:
+        r = await ask_llm(
+            f"New issue from the line, already in the shift log: {json.dumps(note)}. Check context with tools "
+            "(line status, staffing, who is certified and present for that station, earlier notes, open tickets). "
+            "ai_line: one factual line, max 12 words, e.g. 'Second lift problem today · Nora is certified'. "
+            "suggestions: 2-3 actions your tools can carry out, max 5 words each, e.g. 'Open maintenance ticket', 'Assign Nora to station 14'.",
+            final("enrich", {"ai_line": {"type": "string"}, "suggestions": {"type": "array", "items": {"type": "string"}}}))
+        await data("PATCH", f"/notes/{note['id']}", json={"ai_line": r["ai_line"], "suggestions": r["suggestions"][:3]})
+    except Exception as e:
+        print("enrich failed:", e)
+        await data("PATCH", f"/notes/{note['id']}", json={"ai_line": "Logged from the line · systems check unavailable"})
+    notify()
+
+
 @app.post("/events")
-async def on_event(e: dict):
-    t = new_thread(f"{e['line']} {e['station']} · {e['type']} ({e['severity']})", event=e)
-    prompt = (f"New production event (already logged to the shift log): {json.dumps(e)}. "
-              "Explain it to the supervisor with context from the line and who on that line is certified to help, then suggest 3 actions.")
-    asyncio.create_task(handle(t, prompt, show_user=False))
-    return {"thread": t["id"]}
-
-
-class Msg(BaseModel):
-    text: str
-
-
-@app.get("/threads")
-def list_threads():
-    return [public(t) for t in sorted(threads.values(), key=lambda t: t["created"], reverse=True)]
-
-
-@app.get("/threads/{tid}")
-def get_thread(tid: str):
-    if tid not in threads:
-        raise HTTPException(404)
-    threads[tid]["unread"] = False
-    return public(threads[tid], full=True)
-
-
-@app.post("/threads/{tid}/messages")
-async def post_message(tid: str, m: Msg):
-    if tid not in threads:
-        raise HTTPException(404)
-    asyncio.create_task(handle(threads[tid], m.text))
+async def on_event(note: dict):
+    notify()
+    asyncio.create_task(enrich(note))
     return {"ok": True}
 
 
-@app.get("/stream")
+# ---- Carry out a suggested action (after the supervisor confirmed it) ----
+class Act(BaseModel):
+    action: str
+
+
+@app.post("/api/notes/{nid}/act")
+async def act(nid: int, a: Act):
+    note = await data("GET", f"/notes/{nid}")
+    r = await ask_llm(
+        f"The supervisor confirmed this action for issue {json.dumps(note)}: '{a.action}'. Carry it out with your tools. "
+        "result: one past-tense sentence for the log naming what the system returned, e.g. 'Nora assigned to station 14' "
+        "or 'Maintenance ticket #4801 opened'. If it failed, say why.",
+        final("done", {"result": {"type": "string"}, "system": {"type": "string", "description": "Which system did it"}}))
+    await data("POST", f"/notes/{nid}/log", json={"kind": "action", "text": r["result"], "data": {"system": r.get("system")}})
+    await data("PATCH", f"/notes/{nid}", json={"suggestions": [s for s in note["suggestions"] if s != a.action]})
+    notify()
+    return r
+
+
+# ---- Turn the supervisor's own words into a standard response record ----
+class Words(BaseModel):
+    text: str
+
+
+@app.post("/api/notes/{nid}/structure")
+async def structure(nid: int, w: Words):
+    note = await data("GET", f"/notes/{nid}")
+    return await ask_llm(
+        f"Issue: {json.dumps(note['text'])}. The supervisor described the response in their own words: {json.dumps(w.text)}. "
+        "Fill the record ONLY from their words; do not add anything. If a field is not mentioned, write 'not stated'. "
+        "For done_by you may look up names in SAP HR to write the full name. Keep each field short.",
+        final("record", {"action_taken": {"type": "string"}, "done_by": {"type": "string"},
+                         "status": {"type": "string", "enum": ["resolved", "temporary", "escalated", "not stated"]},
+                         "follow_up": {"type": "string"}}))
+
+
+# ---- Sort a free note into a Passdown type ----
+@app.post("/api/classify")
+async def classify(w: Words):
+    return await ask_llm(
+        f"Sort this shift note: {json.dumps(w.text)}. Types: open (still open problem), part (missing part), quality, "
+        "machine (machine down), method (done differently than the official instruction). Station is '12', '14' or empty.",
+        final("sort", {"type": {"type": "string", "enum": ["open", "part", "quality", "machine", "method"]},
+                       "station": {"type": "string"}}), use_tools=False)
+
+
+# ---- Draft the handoff paragraph from the log ----
+@app.post("/api/handoff")
+async def handoff():
+    shift, staffing, tickets = await asyncio.gather(data("GET", "/shift/d26"), data("GET", "/stations"), data("GET", "/tickets"))
+    return await ask_llm(
+        f"Write the handoff for the night shift from this data only. Shift log: {json.dumps(shift)}. "
+        f"Staffing: {json.dumps(staffing)}. Maintenance tickets: {json.dumps(tickets)}. "
+        "4-6 short sentences: who is on which station, what is still open, what was done, what the next shift must know "
+        "(including anything done outside the official method).",
+        final("handoff", {"paragraph": {"type": "string"}}), use_tools=False)
+
+
+# ---- Systems page: list systems and answer questions ----
+@app.get("/api/systems")
+def systems():
+    return [{k: s[k] for k in ("name", "about", "examples", "tools")} | {"connected": True} for s in SYSTEMS]
+
+
+class Ask(BaseModel):
+    text: str
+    history: list[dict] = []  # [{role: user|assistant, content}], kept by the page only
+
+
+@app.post("/api/ask")
+async def ask(a: Ask):
+    return await ask_llm(
+        a.text + "\n\n(Answer in 1-4 short sentences. Do not change anything in any system; if the supervisor wants a change, "
+                 "say what you would do. chips: up to 3 short follow-up questions they might ask next. "
+                 "sources: names of the systems you used, from: Line dashboard, SAP HR, Maintenance, Shift log.)",
+        final("answer", {"answer": {"type": "string"}, "chips": {"type": "array", "items": {"type": "string"}},
+                         "sources": {"type": "array", "items": {"type": "string"}}}),
+        history=a.history)
+
+
+@app.get("/api/stream")
 async def stream():
     q = asyncio.Queue()
     subscribers.add(q)
 
     async def gen():
         try:
+            yield "data: hello\n\n"
             while True:
                 yield f"data: {await q.get()}\n\n"
         finally:
             subscribers.discard(q)
     return StreamingResponse(gen(), media_type="text/event-stream")
-
-
-@app.get("/")
-def index():
-    return FileResponse(Path(__file__).with_name("index.html"))
 
 
 if __name__ == "__main__":

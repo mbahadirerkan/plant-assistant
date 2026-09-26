@@ -1,17 +1,22 @@
-# Plant Supervisor Assistant (MVP)
+# Passdown + plant systems (hackathon MVP)
+
+Passdown (the shift notebook, from tarikemal/passdown) running on live plant data, with an AI that reads and acts on the systems through MCP.
 
 ```
-backends/app.py      fake SAP HR + line dashboard + shift log  (:8001, reseeds on start)
-mcp_servers/*.py     one MCP adapter per system
-agent/server.py      threads + Claude tool loop, chat UI       (:8000)
+web/              Passdown UI (React + Vite)                               :5173
+agent/server.py   AI: enriches line issues, runs actions, structures responses, drafts handoffs   :8000
+mcp_servers/      one adapter per system: line, SAP HR, maintenance, shift log
+backends/app.py   fake plant systems + demo control page (reseeds on start)                   :8001
 ```
 
-Run (two terminals):
+Run (three terminals, from this folder):
 ```
 pip install -r requirements.txt
 python backends/app.py
 $env:GEMINI_API_KEY="..."; python agent/server.py
+npm --prefix web install; npm --prefix web run dev
 ```
-Chat: http://localhost:8000 · Demo control / fake SAP: http://localhost:8001 ("Fire" buttons send line warnings)
+App: http://localhost:5173 · Control page (fire line warnings, see SAP/tickets change): http://localhost:8001
 
-Add a capability: new MCP server in `mcp_servers/`, add its filename to `MCP_SERVERS` in `agent/server.py`.
+Add a system: write an MCP server in `mcp_servers/`, add an entry to `SYSTEMS` in `agent/server.py`.
+Other models: set `LLM_MODEL`, or `LLM_BASE_URL` for any OpenAI-compatible provider (e.g. Ollama).
