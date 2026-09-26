@@ -1,0 +1,53 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Supervisor Assistant</title>
+<style>
+body{margin:0;font-family:sans-serif;display:flex;height:100vh}
+#list{width:300px;border-right:1px solid #ddd;overflow:auto}
+.th{padding:10px;border-bottom:1px solid #eee;cursor:pointer}.th.sel{background:#eef}.th b.u::after{content:" ●";color:#d33}
+.th small{color:#666;display:block}
+#view{flex:1;display:flex;flex-direction:column}
+#msgs{flex:1;overflow:auto;padding:12px}
+.m{max-width:75%;margin:6px 0;padding:8px 10px;border-radius:8px;white-space:pre-wrap}
+.assistant{background:#f1f1f1}.supervisor{background:#dcf8c6;margin-left:auto}
+.m small{color:#888;display:block;margin-top:4px}
+.acts button{margin:4px 4px 0 0}
+form{display:flex;border-top:1px solid #ddd}input{flex:1;padding:10px;border:0}
+</style></head><body>
+<div id="list"></div>
+<div id="view"><div id="msgs"></div><form id="f"><input id="in" placeholder="Type a message…"><button>Send</button></form></div>
+<script>
+let cur = null;
+const $ = id => document.getElementById(id);
+const esc = s => (s || "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+async function loadList() {
+  const ts = await (await fetch("/threads")).json();
+  if (!cur && ts.length) cur = ts[ts.length - 1].id;
+  $("list").innerHTML = ts.map(t => `<div class="th ${t.id == cur ? "sel" : ""}" onclick="open_('${t.id}')">
+    <b class="${t.unread && t.id != cur ? "u" : ""}">${esc(t.title)}</b><small>${t.busy ? "typing…" : esc(t.preview)}</small></div>`).join("");
+}
+
+async function loadThread() {
+  if (!cur) return;
+  const t = await (await fetch("/threads/" + cur)).json();
+  const n = t.messages.length;
+  $("msgs").innerHTML = t.messages.map((m, i) => m.role == "supervisor"
+    ? `<div class="m supervisor">${esc(m.text)}</div>`
+    : `<div class="m assistant"><b>${esc(m.summary)}</b>\n${esc(m.body)}
+       ${(m.attachments || []).map(a => `<div><a href="${a.url}" target="_blank">📄 ${esc(a.label)}</a></div>`).join("")}
+       ${i == n - 1 && !t.busy ? `<div class="acts">${m.actions.map(a => `<button onclick="send(this.textContent)">${esc(a)}</button>`).join("")}</div>` : ""}
+       ${m.tools && m.tools.length ? `<small>tools: ${m.tools.join(", ")}</small>` : ""}</div>`).join("")
+    + (t.busy ? `<div class="m assistant">…</div>` : "");
+  $("msgs").scrollTop = 1e9;
+}
+
+function open_(id) { cur = id; loadList(); loadThread(); }
+async function send(text) {
+  if (!text.trim() || !cur) return;
+  await fetch(`/threads/${cur}/messages`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text})});
+}
+$("f").onsubmit = e => { e.preventDefault(); send($("in").value); $("in").value = ""; };
+new EventSource("/stream").onmessage = e => { loadList(); if (e.data == cur) loadThread(); };
+loadList().then(loadThread);
+</script></body></html>
